@@ -26,96 +26,162 @@ struct court {
 };
 
 // Struct to represent each element in the queue
-typedef struct {
+typedef struct Node {
     char data[MAXLINE];
-} QueueElement;
+    struct Node* prev;
+    struct Node* next;
+} Node;
 
-// Struct to represent the queue
+// Struct to represent the doubly linked list
 typedef struct {
-    QueueElement elements[MAX_QUEUE_SIZE];
-    int start;
-    int end;
+    Node* start;
+    Node* end;
     int size;
-} SharedQueue;
+} SharedLinkedList;
 
-// Create or attach to shared memory for the queue
-SharedQueue* createSharedQueue(int* shmid2) {
-    key_t key = ftok("/tmp", 'Q'); // Unique key for the shared memory segment
+// Create or attach to shared memory for the linked list
+SharedLinkedList* createSharedLinkedList(int* shmid) {
+    key_t key = ftok("/tmp", 'L'); // Unique key for the shared memory segment
 
     // Create or get the shared memory segment
-    int shmid = shmget(key, sizeof(SharedQueue), 0666 | IPC_CREAT);
-    if (shmid == -1) {
+    *shmid = shmget(key, sizeof(SharedLinkedList), 0666 | IPC_CREAT);
+    if (*shmid == -1) {
         perror("shmget");
         exit(1);
     }
 
     // Attach to the shared memory segment
-    SharedQueue* sharedQueue = (SharedQueue*)shmat(shmid, NULL, 0);
-    if (sharedQueue == (SharedQueue*)-1) {
+    SharedLinkedList* sharedLinkedList = (SharedLinkedList*)shmat(*shmid, NULL, 0);
+    if (sharedLinkedList == (SharedLinkedList*)-1) {
         perror("shmat");
         exit(1);
     }
 
-    // Initialize the queue
-    sharedQueue->start = 0;
-    sharedQueue->end = -1;
-    sharedQueue->size = 0;
-
-    return sharedQueue;
+    // Initialize the linked list
+    sharedLinkedList->start = NULL;
+    sharedLinkedList->end = NULL;
+    sharedLinkedList->size = 0;
+    return sharedLinkedList;
 }
 
-// Enqueue an element into the shared queue
-void enqueue(SharedQueue* queue, const char* element) {
-    if (queue->size == MAX_QUEUE_SIZE) {
-        fprintf(stderr, "Queue is full. Cannot enqueue.\n");
-        return; // Queue is full, cannot enqueue
+// Insert an element at the end of the shared linked list
+void insert(SharedLinkedList* list, const char* element) {
+    Node* newNode = (Node*)malloc(sizeof(Node));
+    if (newNode == NULL) {
+        fprintf(stderr, "Memory allocation failed.\n");
+        exit(1);
     }
 
-    queue->end = (queue->end + 1) % MAX_QUEUE_SIZE;
-    strcpy(queue->elements[queue->end].data, element);
-    queue->size++;
+    strcpy(newNode->data, element);
+    newNode->prev = list->end;
+    newNode->next = NULL;
+
+    if (list->end != NULL) {
+        list->end->next = newNode;
+    } else {
+        list->start = newNode;
+    }
+    list->end = newNode;
+
+    list->size++;
 }
 
-// Dequeue an element from the shared queue
-void dequeue(SharedQueue* queue) {
-    if (queue->size == 0) {
-        fprintf(stderr, "Queue is empty. Cannot dequeue.\n");
-        return; // Queue is empty, cannot dequeue
+// Remove the first element from the shared linked list
+void removeFirst(SharedLinkedList* list) {
+    if (list->size == 0) {
+        fprintf(stderr, "List is empty. Cannot remove.\n");
+        return;
     }
 
-    queue->start = (queue->start + 1) % MAX_QUEUE_SIZE;
-    queue->size--;
+    Node* temp = list->start;
+    list->start = temp->next;
+    if (list->start != NULL) {
+        list->start->prev = NULL;
+    } else {
+        list->end = NULL;
+    }
+
+    free(temp);
+    list->size--;
 }
 
-// Search for an element in the shared queue based on Player-ID
-int searchQueue(SharedQueue* queue, const char* playerId) {
-    for (int i = 0; i < queue->size; i++) {
-        int index = (queue->start + i) % MAX_QUEUE_SIZE;
-        if (strstr(queue->elements[index].data, playerId) != NULL) {
+// Search for an element in the shared linked list based on Player-ID
+int searchList(SharedLinkedList* list, char* req_pref) {
+    Node* current = list->start;
+    int index = 0;
+    while (current != NULL) {
+        char* req = current->data;
+        int pid, arr_time;
+        char* sex;
+        char* preference;
+        pid = atoi(strtok(req, ","));
+        arr_time = atoi(strtok(NULL, ","));
+        sex = strtok(NULL, ",");
+        size_t len_sex = strlen(sex);
+        if (len_sex > 0 && sex[len_sex-1] == '\n'){
+            sex[len_sex-1] = '\0';
+        }
+        preference = strtok(NULL, ",");
+        size_t len_pref = strlen(preference);
+        if (len_pref > 0 && preference[len_pref-1] == '\n'){
+            preference[len_pref-1] = '\0';
+        }
+        if (strcmp(preference, req_pref) == 0) {
             return index; // Return the index if found
         }
+        current = current->next;
+        index++;
     }
 
     return -1; // Return -1 if not found
 }
 
-// Display the elements in the shared queue
-void displayQueue(SharedQueue* queue) {
-    printf("Queue elements:\n");
-    for (int i = 0; i < queue->size; i++) {
-        int index = (queue->start + i) % MAX_QUEUE_SIZE;
-        printf("%s\n", queue->elements[index].data);
+// Display the elements in the shared linked list
+void displayList(SharedLinkedList* list) {
+    printf("List elements:\n");
+    Node* current = list->start;
+    while (current != NULL) {
+        printf("%s\n", current->data);
+        current = current->next;
     }
 }
 
 // Detach from shared memory
-void detachSharedQueue(SharedQueue* queue) {
-    shmdt(queue);
+void detachSharedLinkedList(SharedLinkedList* list) {
+    shmdt(list);
 }
 
 // Remove the shared memory segment
-void removeSharedQueue(int shmid) {
+void removeSharedLinkedList(int shmid) {
     shmctl(shmid, IPC_RMID, NULL);
+}
+
+
+int handle_req(struct court* courts, char* req, SharedLinkedList* list){
+    int pid, arr_time;
+    char* sex;
+    char* preference;
+    pid = atoi(strtok(req, ","));
+    arr_time = atoi(strtok(NULL, ","));
+    sex = strtok(NULL, ",");
+    size_t len_sex = strlen(sex);
+    if (len_sex > 0 && sex[len_sex-1] == '\n'){
+        sex[len_sex-1] = '\0';
+    }
+    preference = strtok(NULL, ",");
+    size_t len_pref = strlen(preference);
+    if (len_pref > 0 && preference[len_pref-1] == '\n'){
+        preference[len_pref-1] = '\0';
+    }
+    if (list->size == 0){
+        insert(list,req);
+        return 0;
+    }
+    // Analyzing what request needs
+    // Find an appropriate opponent
+    if (strcmp(preference,"S") == 0) {
+         
+    }
 }
 
 int main (int argc, char **argv)
@@ -134,7 +200,6 @@ int main (int argc, char **argv)
     return 1;
     }
 
-    // Initialize the time_slots
 
     for (int i = 0; i < MAX_COURTS; i++) {
 
@@ -146,7 +211,7 @@ int main (int argc, char **argv)
     sem_init(&courts[i].access, 1, 1);
     }
     int* shmid2;
-    SharedQueue* sharedQueue = createSharedQueue(shmid2);
+    SharedLinkedList* sharedLinkedList = createSharedLinkedList(shmid2);
 
     int listenfd, connfd, n;
     pid_t childpid;
@@ -197,7 +262,8 @@ int main (int argc, char **argv)
         }
 
         else {
-
+            // Write code here.
+            int res = handle_req(courts,buf,sharedLinkedList);
         }
         close(connfd);
         printf("Finished serving a child\n");
@@ -208,8 +274,8 @@ int main (int argc, char **argv)
     }
     shmdt(courts);
     shmctl(shmid, IPC_RMID, NULL);
-    detachSharedQueue(sharedQueue);
-    removeSharedQueue(*shmid2);
+    detachSharedLinkedList(sharedLinkedList);
+    removeSharedLinkedList(*shmid2);
     return 0;
 
 }
