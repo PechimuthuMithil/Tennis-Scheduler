@@ -9,21 +9,20 @@
 
 #define MAX_PLAYERS 100
 #define MAX_COURTS 4
-#define MAX_QUEUE_SIZE 100
-#define MAXLINE 5120 /* max text line length */
 #define MAX_ROW_LENGTH 5120
 
-typedef struct {
+typedef struct PlayerNode {
     int player_id;
     int arrival_time;
     char gender;
     char preference;
-} Player;
+    struct PlayerNode* next;
+    struct PlayerNode* prev;
+} PlayerNode;
 
 typedef struct {
-    Player players[MAX_QUEUE_SIZE];
-    int front;
-    int rear;
+    PlayerNode* front;
+    PlayerNode* rear;
     int count;
 } Queue;
 
@@ -38,32 +37,37 @@ typedef struct {
 Queue singles_queue, doubles_queue;
 Court courts[MAX_COURTS];
 pthread_t reader_thread, singles_thread, doubles_thread;
+bool singles_queue_empty = false;
+bool doubles_queue_empty = false;
+bool enquing_done = false;
 
 void* reader_function(void* arg);
 void* singles_function(void* arg);
 void* doubles_function(void* arg);
-void enqueue(Queue* queue, Player player);
-Player dequeue(Queue* queue);
+void enqueue(Queue* queue, int player_id, int arrival_time, char gender, char preference);
+void dequeue(Queue* queue, bool* empty);
 void schedule_game(Queue* queue, int court_number, int numplayers);
 
 int main(int argc, char **argv) {
     // Initialize queues
-    FILE* reqs;
-    FILE* output;
-    char req[MAX_ROW_LENGTH];
-
-    reqs = fopen(argv[1], "r");
-    if (reqs == NULL) {
-        perror("Error opening request file");
-        exit(5);
-    }
-    fgets(req, MAX_ROW_LENGTH, reqs);
+    singles_queue.front = singles_queue.rear = NULL;
+    singles_queue.count = 0;
+    doubles_queue.front = doubles_queue.rear = NULL;
+    doubles_queue.count = 0;
 
     // Initialize courts
     for (int i = 0; i < MAX_COURTS; i++) {
         courts[i].court_number = i + 1;
+        courts[i].game_start_time = 0;
         courts[i].endtime = 0;
         sem_init(&courts[i].lock, 0, 1); // Initialize each court semaphore with value 1 (unlocked)
+    }
+
+    // Open request file
+    FILE* reqs = fopen(argv[1], "r");
+    if (reqs == NULL) {
+        perror("Error opening request file");
+        exit(5);
     }
 
     // Create threads
@@ -71,19 +75,21 @@ int main(int argc, char **argv) {
     pthread_create(&singles_thread, NULL, singles_function, NULL);
     pthread_create(&doubles_thread, NULL, doubles_function, NULL);
     printf("Hi from main\n");
+
     // Join threads
     pthread_join(reader_thread, NULL);
     pthread_join(singles_thread, NULL);
     pthread_join(doubles_thread, NULL);
 
+    printf("NEED TO HANDLE EDGE CASE WHEN BOTH QUEUES ARE NOT TOTALLY EMPTY\n");
     return 0;
 }
 
 void* reader_function(void* arg) {
     FILE* reqs = (FILE*)arg;
     char req[MAX_ROW_LENGTH];
+    fgets(req, MAX_ROW_LENGTH, reqs);
     while (fgets(req, MAX_ROW_LENGTH, reqs) != NULL) {
-        printf("%s\n",req);
         int pid, arr_time;
         char* sex;
         char* preference;
@@ -108,78 +114,131 @@ void* reader_function(void* arg) {
             preference[len_pref - 1] = '\0';
         }
 
-        Player player;
-        player.player_id = pid;
-        player.arrival_time = arr_time;
-        player.gender = sex[0]; // Assuming gender is a single character
-        player.preference = preference[0]; // Assuming preference is a single character
-        
         // Enqueue the player based on preference
-        if (player.preference == 'S' || player.preference == 'b') {
-            printf("Enquing.%d\n",player.player_id);
-            enqueue(&singles_queue, player);
+        if (preference[0] == 'S' || preference[0] == 'b') {
+            printf("Enquing.%d\n", pid);
+            enqueue(&singles_queue, pid, arr_time, sex[0], preference[0]);
         }
-        else if (player.preference == 'D' || player.preference == 'B') {
-            enqueue(&doubles_queue, player);
+        else if (preference[0] == 'D' || preference[0] == 'B') {
+            enqueue(&doubles_queue, pid, arr_time, sex[0], preference[0]);
         }
         else {
             fprintf(stderr, "Invalid preference for player %d\n", pid);
         }
     }
+    enquing_done = true;
+    fclose(reqs);
+    printf("Sucessfully exiting reader's func\n");
     return NULL;
 }
 
-
 void* singles_function(void* arg) {
+
     while (1) {
-        if (singles_queue.count < 2) {
+        printf("count :%d\n",singles_queue.count);
+        if (singles_queue.count < 2/*singles_queue.front == NULL || singles_queue.front->next == NULL*/) {
+            if (enquing_done){
+                break;
+            }
             continue;
         }
-        printf("Started\n");
         for (int i = 0; i < MAX_COURTS; i++) {
             sem_wait(&courts[i].lock); // Acquire lock on the court
-            if (courts[i].endtime < singles_queue.players[singles_queue.front].arrival_time) {
+            // int count = 0;
+            // PlayerNode* ptr = singles_queue.front;
+            // while (count <= 2 && ptr != NULL) {
+            //     ptr = ptr->next;
+            //     count += 1;
+            // }
+            // if (count != 2) {
+            //     break;
+            // }
+            if (courts[i].endtime < singles_queue.front->next->arrival_time) {
                 schedule_game(&singles_queue, i, 2); // Schedule singles game on court i
+                dequeue(&singles_queue, &singles_queue_empty);
+                dequeue(&singles_queue, &singles_queue_empty);
+                printf("empty? :%d\n",singles_queue_empty);
+                sem_post(&courts[i].lock); // Release lock on the court
+                break;
             }
-            sem_post(&courts[i].lock); // Release lock on the court
+        }
+        if (enquing_done && singles_queue_empty){
+            break;
         }
     }
+    printf("Sucessfully exiting single's func\n");
     return NULL;
 }
 
 void* doubles_function(void* arg) {
     while (1) {
-        if (doubles_queue.count < 2) {
+        if (doubles_queue.count < 4) {
+            if (enquing_done){
+                break;
+            }
             continue;
         }
-
+        printf("This should not have been printed\n");
         for (int i = 0; i < MAX_COURTS; i++) {
             sem_wait(&courts[i].lock); // Acquire lock on the court
-            if (courts[i].endtime < doubles_queue.players[doubles_queue.front].arrival_time) {
-                schedule_game(&doubles_queue, i, 4); // Schedule singles game on court i
+            if (courts[i].endtime < doubles_queue.front->next->next->next->arrival_time) {
+                schedule_game(&doubles_queue, i, 4); // Schedule doubles game on court i
+                dequeue(&doubles_queue, &doubles_queue_empty);
+                dequeue(&doubles_queue, &doubles_queue_empty);
+                dequeue(&doubles_queue, &doubles_queue_empty);
+                dequeue(&doubles_queue, &doubles_queue_empty);
             }
             sem_post(&courts[i].lock); // Release lock on the court
         }
+        if (enquing_done && doubles_queue.count == 0){
+            break;
+        }
     }
+    printf("Sucessfully exiting double's func\n");
     return NULL;
 }
 
-void enqueue(Queue* queue, Player player) {
-    if (queue->count < MAX_QUEUE_SIZE) {
-        queue->rear = (queue->rear + 1) % MAX_QUEUE_SIZE;
-        queue->players[queue->rear] = player;
-        queue->count++;
+void enqueue(Queue* queue, int player_id, int arrival_time, char gender, char preference) {
+    PlayerNode* newNode = (PlayerNode*)malloc(sizeof(PlayerNode));
+    if (newNode == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(EXIT_FAILURE);
     }
+    newNode->player_id = player_id;
+    newNode->arrival_time = arrival_time;
+    newNode->gender = gender;
+    newNode->preference = preference;
+    newNode->next = NULL;
+    newNode->prev = queue->rear;
+
+    if (queue->rear == NULL) {
+        queue->front = newNode;
+    } else {
+        queue->rear->next = newNode;
+    }
+    queue->rear = newNode;
+    queue->count++;
+    printf("Sucessfully exiting enqueue\n");
 }
 
-Player dequeue(Queue* queue) {
-    Player player;
-    if (queue->count > 0) {
-        player = queue->players[queue->front];
-        queue->front = (queue->front + 1) % MAX_QUEUE_SIZE;
-        queue->count--;
+void dequeue(Queue* queue, bool* empty) {
+    if (queue->front == NULL) {
+        fprintf(stderr, "Queue is empty\n");
+        return;
     }
-    return player;
+    PlayerNode* temp = queue->front;
+    queue->front = queue->front->next;
+    if (queue->front == NULL) {
+        queue->rear = NULL;
+    } else {
+        queue->front->prev = NULL;
+    }
+    free(temp);
+    queue->count--;
+    if (queue->count == 0){
+        *empty = true;
+    }
+     printf("Sucessfully exiting dequeue\n");
 }
 
 void schedule_game(Queue* queue, int court_number, int numplayers) {
@@ -188,12 +247,12 @@ void schedule_game(Queue* queue, int court_number, int numplayers) {
 
     // Calculate end time based on the number of male players and game type
     int num_male_players = 0;
+    PlayerNode* current = queue->front;
     for (int i = 0; i < numplayers; i++) {
-        if (queue->players[queue->front].gender == 'M') {
+        if (current->gender == 'M') {
             num_male_players++;
         }
-        queue->front = (queue->front + 1) % MAX_QUEUE_SIZE;
-        queue->count--;
+        current = current->next;
     }
 
     if (num_male_players == 0) {
@@ -203,15 +262,25 @@ void schedule_game(Queue* queue, int court_number, int numplayers) {
     }
 
     // Update court state
-    courts[court_number].game_start_time = queue->players[queue->front].arrival_time;
+    if (numplayers == 2){
+        courts[court_number].game_start_time = queue->front->next->arrival_time;
+        // printf("start time: %d\n", queue->front->next->arrival_time);
+    }
+    else {
+        courts[court_number].game_start_time = queue->front->next->next->next->arrival_time;
+    }
+    // courts[court_number].game_start_time = queue->front->arrival_time;
+    // printf("start time: %d\n",courts[court_number].game_start_time);
     endtime += courts[court_number].game_start_time;
-    courts[court_number].endtime = endtime;
-
+    courts[court_number].endtime = endtime; 
     // Output to CSV file
-    printf("Game-start-time: %d, Court-Number: %d, List-of-player-ids: ", 
-           courts[court_number].game_start_time, courts[court_number].court_number);
+    printf("Game-start-time: %d, End time: %d, Court-Number: %d, List-of-player-ids: ", 
+           courts[court_number].game_start_time, courts[court_number].endtime, courts[court_number].court_number);
+    current = queue->front;
     for (int i = 0; i < numplayers; i++) {
-        printf("%d ", queue->players[(queue->front + i) % MAX_QUEUE_SIZE].player_id);
+        printf("%d ", current->player_id);
+        current = current->next;
     }
     printf("\n");
+    printf("Sucessfully exiting schedule_game\n");
 }
