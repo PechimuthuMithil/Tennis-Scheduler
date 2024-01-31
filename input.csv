@@ -1,5 +1,9 @@
 Player-ID,Arrival-time,Gender,Preference
-1,1,M,S
-2,1,F,S
-3,2,M,S
-4,3,M,b
+1,1,M,D
+2,1,F,D
+3,2,M,D
+4,3,M,B
+5,4,M,D
+6,4,F,D
+7,5,M,D
+8,6,M,b
