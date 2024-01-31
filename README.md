@@ -46,9 +46,21 @@ Demo example
 ```
 ./scheduler "input.csv"
 ```
-
 The output.csv that is generated will containg the results in the following form  
 Game-start-time Game-end-time Court-Number List-of-player-ids  
 1 11 1 1 2  
 3 13 2 3 4  
 
+## Logic of the Scheduler
+1) The player requests are pushed into two differnet queues based on their first preferences.
+2) Games are scheduled to satisy the player's first preference.
+3) Once the the games to be scheduled on based of first prefernefces are complete, the scheduler shcedules games on the basis of the second preference.
+4) The game start time is the MAX(Game-end-time, Arrival-time of the last player (to play in a court))
+5) Courts are assigned to a group of players from the set of 4 courts by choosing the one with the lowest Game-end-time. Game-end-time of an un-assigned court is -1
+
+The Scheduler is multi-threaded.  
+```
+                  |------------enqueueing thread------------>|  
+---main thread--->|----thread to schedule single's games---->|---main thread to perform 2nd priority scheduling-->  
+                  |----thread to schedule double's games---->|  
+```
