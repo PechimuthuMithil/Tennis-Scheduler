@@ -10,10 +10,12 @@
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <fcntl.h>  
 
 #define MAX_ROW_LENGTH 5120
 #define SERV_PORT 3000
 #define SERV_PORT2 3010
+#define TIMEOUT_SECONDS 30
 
 typedef struct Time {
     int time;
@@ -119,11 +121,41 @@ int main() {
                         perror("Problem in connecting to the server scheduler");
                         exit(3);
                     }
+
+                    
                     strcpy(sendline, req_cpy);
                     printf("Request: %s\n", req_cpy);
                     send(sockfd, sendline, strlen(sendline), 0);
-                    int n = recv(sockfd, recvline, MAX_ROW_LENGTH, 0);
-                    close(sockfd);
+                    
+                    int flags = fcntl(sockfd, F_GETFL, 0);
+                    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+                    int timeout = TIMEOUT_SECONDS;
+                    int n;
+
+                    while (timeout > 0) {                       
+                        n = recv(sockfd, recvline, MAX_ROW_LENGTH, 0);
+
+                        // Check if data received
+                        if (n > 0) {
+                            close(sockfd);
+                            break;
+                        } else if (n == 0) {
+                            printf("Connection closed by the peer\n");
+                            break;
+                        } else {
+                            timeout--;
+                            sleep(1); // Sleep for 1 s
+                        }
+                    }
+                    if (timeout == 0) {
+                        printf("Player %d Timedout at %d\n",plid,globalTime->time);
+                        close(sockfd);
+                        exit(0);
+                        break;
+                    }
+
+                    // int n = recv(sockfd, recvline, MAX_ROW_LENGTH, 0);
+                    // close(sockfd);
                     // return courtid,starttime,endtime,num_players,playerIDs,caller
                     // printf("Player: %d Recieved %s\n",plid,recvline);
 
