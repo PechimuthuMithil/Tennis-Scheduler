@@ -7,12 +7,14 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <omp.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/select.h>
 #include <sys/time.h>
+#include <errno.h>
 
 #define MAXLINE 5120 /*max text line length*/
 #define SERV_PORT 3000 /*port*/
@@ -67,32 +69,11 @@ void enqueue(Queue* queue, int player_id, int arrival_time, char gender, char pr
 void dequeue(Queue* queue, bool* empty);
 void schedule_game(Queue* queue, int court_number, int numplayers);
 void enq_front(Queue* queue, int player_id, int arrival_time, char gender, char preference, bool* empty);
+int isClientAlive(int connfd);
 
 int isClientAlive(int connfd) {
-    fd_set rfds;
-    struct timeval tv;
-    int retval;
-
-    // Watch the client's connection to see if it has input
-    FD_ZERO(&rfds);
-    FD_SET(connfd, &rfds);
-
-    // Wait for a short time
-    tv.tv_sec = 0;
-    tv.tv_usec = 50000; // 50 milliseconds
-
-    retval = select(connfd + 1, &rfds, NULL, NULL, &tv);
-
-    if (retval == -1) {
-        perror("select()");
-        return 0; // Error occurred, assume connection is not alive
-    } else if (retval) {
-        // Data is available to read, connection is still alive
-        return 1;
-    } else {
-        // No data available within the timeout period, connection is not alive
-        return 0;
-    }
+    int res = recv(connfd,NULL,1, MSG_PEEK | MSG_DONTWAIT);
+    return res != 0?1:0;
 }
 
 void singles_function() {
@@ -114,15 +95,19 @@ void singles_function() {
         }
         // Check if the top two are still alive or timed out.
         if(!isClientAlive(singles_queue.front->connfd)){
+            printf("Player %d has timedout\n",singles_queue.front->player_id);
             dequeue(&singles_queue, &singles_queue_empty);
             if(!isClientAlive(singles_queue.front->connfd)){
+                printf("Player %d has timedout\n",singles_queue.front->player_id);
                 dequeue(&singles_queue, &singles_queue_empty);
             }
-            continue; //skip this iteration
         }
-        schedule_game(&singles_queue, min_endtime_court, 2); // Schedule singles game on court i
-        dequeue(&singles_queue, &singles_queue_empty);
-        dequeue(&singles_queue, &singles_queue_empty);
+        else {
+            schedule_game(&singles_queue, min_endtime_court, 2); // Schedule singles game on court i
+            dequeue(&singles_queue, &singles_queue_empty);
+            dequeue(&singles_queue, &singles_queue_empty);
+        }
+
         }
         // sem_post(&search); // Release lock on the court
         if (enquing_done && singles_queue_empty){
@@ -150,23 +135,30 @@ void doubles_function() {
             }
         }
         if(!isClientAlive(doubles_queue.front->connfd)){
+            printf("Player %d has timedout\n",doubles_queue.front->player_id);
             dequeue(&doubles_queue, &doubles_queue_empty);
             if(!isClientAlive(doubles_queue.front->connfd)){
+                printf("Player %d has timedout\n",doubles_queue.front->player_id);
                 dequeue(&doubles_queue, &doubles_queue_empty);
                 if(!isClientAlive(doubles_queue.front->connfd)){
+                    printf("Player %d has timedout\n",doubles_queue.front->player_id);
                     dequeue(&doubles_queue, &doubles_queue_empty);
                     if(!isClientAlive(doubles_queue.front->connfd)){
+                        printf("Player %d has timedout\n",doubles_queue.front->player_id);
                         dequeue(&doubles_queue, &doubles_queue_empty);
                     }
                 }
             }
-            continue; // skip this iteration
+            // continue; // skip this iteration
         }
-        schedule_game(&doubles_queue, min_endtime_court, 4); // Schedule singles game on court i
-        dequeue(&doubles_queue, &doubles_queue_empty);
-        dequeue(&doubles_queue, &doubles_queue_empty);
-        dequeue(&doubles_queue, &doubles_queue_empty);
-        dequeue(&doubles_queue, &doubles_queue_empty);
+        else {
+            schedule_game(&doubles_queue, min_endtime_court, 4); // Schedule singles game on court i
+            dequeue(&doubles_queue, &doubles_queue_empty);
+            dequeue(&doubles_queue, &doubles_queue_empty);
+            dequeue(&doubles_queue, &doubles_queue_empty);
+            dequeue(&doubles_queue, &doubles_queue_empty);
+        }
+
         }
         // sem_post(&search); // Release lock on the court
         if (enquing_done && doubles_queue_empty){
@@ -250,35 +242,25 @@ void schedule_game(Queue* queue, int court_number, int numplayers) {
     char msg[MAX_ROW_LENGTH];
    
     int chars_written = sprintf(msg,"%d,%d,%d,%d,",courts[court_number].court_number,courts[court_number].game_start_time,courts[court_number].endtime,numplayers);
-    // int chars_written = sprintf(msg1, "Game-start-time: %d, End time: %d, Court-Number: %d, List-of-player-ids: ", 
-                                // courts[court_number].game_start_time, courts[court_number].endtime, courts[court_number].court_number);
-    // printf("Game-start-time: %d, End time: %d, Court-Number: %d, List-of-player-ids: ", 
-        //    courts[court_number].game_start_time, courts[court_number].endtime, courts[court_number].court_number);
     current = queue->front;
+
     for (int i = 0; i < numplayers; i++) {
-        char msg2[3];
+        char msg2[10];
         chars_written += sprintf(msg2,"%d,",current->player_id);
         strcat(msg,msg2);
         current = current->next;
     }
-    char msg2[3];
-    chars_written += sprintf(msg2,"%d\n",queue->front->player_id);
-    strcat(msg,msg2);
-
     current = queue->front;
-    // FILE* output = fopen("output.csv", "a");
-    // fprintf(output, "%d,%d,%d", courts[court_number].game_start_time, courts[court_number].endtime, courts[court_number].court_number);
     for (int i = 0; i < numplayers; i++) {
-        // printf("%d ",current->player_id);
-        // fprintf(output,",%d", current->player_id);
-        send(current->connfd, msg, chars_written, 0);
+        printf("Sending %d --> %s\n",current->player_id, msg);
+        int n = send(current->connfd, msg, chars_written, 0);
+        if (n == -1) {
+            perror("Error sending data");
+            close(current->connfd);
+        }
         close(current->connfd);
-        printf("Sending %d --> %s\n",current->connfd, msg);
         current = current->next;
     }
-    // fprintf(output, "\n");
-    // fclose(output);
-    // printf("\n");
 }
 
 int main() {
@@ -290,7 +272,7 @@ int main() {
 
     //creation of the socket
     listenfd = socket (AF_INET, SOCK_STREAM, 0);
-    listenfd2 = socket (AF_INET, SOCK_STREAM, 0);
+    // listenfd2 = socket (AF_INET, SOCK_STREAM, 0);
 
     //preparation of the socket address 
     servaddr.sin_family = AF_INET;
@@ -302,9 +284,9 @@ int main() {
     servaddr2.sin_port = htons(SERV_PORT2);
         
     bind(listenfd, (struct sockaddr *) &servaddr, sizeof(servaddr));
-    bind(listenfd2, (struct sockaddr *) &servaddr2, sizeof(servaddr2)); 
+    // bind(listenfd2, (struct sockaddr *) &servaddr2, sizeof(servaddr2)); 
     listen(listenfd, LISTENQ);
-    listen(listenfd2, LISTENQ);
+    // listen(listenfd2, LISTENQ);
         
     // printf("%s\n","Server running...waiting for connections.");
 
@@ -342,7 +324,7 @@ int main() {
                     perror("Problem in accepting connection");
                     exit(3);
                 }
-                // printf("%s\n", "Received request...");
+                printf("%s\n", "Received request...");
                 #pragma omp task firstprivate(connfd)
                 {
                     while ((n = recv(connfd, buf, MAXLINE, 0)) > 0) {
@@ -375,7 +357,7 @@ int main() {
                             {
                                 // printf("Single count: %d\n", singles_queue.count);
                                 enqueue(&singles_queue, pid, arr_time, sex[0], preference[0], connfd, &singles_queue_empty);
-                                // printf("Single count: %d\n", singles_queue.count);
+                                printf("Single Player Enqued\n");
                             }
                         }
                         else if (preference[0] == 'D' || preference[0] == 'B') {
@@ -401,6 +383,6 @@ int main() {
         }
     }
     close(listenfd); 
-    close(listenfd2);
+    // close(listenfd2);
     return 0;
 }
