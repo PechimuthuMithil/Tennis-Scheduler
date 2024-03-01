@@ -238,7 +238,7 @@ void schedule_game(Queue* queue, int court_number, int numplayers) {
     }
     endtime += courts[court_number].game_start_time;
     courts[court_number].endtime = endtime; 
-    // return courtid,starttime,endtime,num_players,playerIDs,caller
+    // return courtid,starttime,endtime,num_players,playerIDs,
     char msg[MAX_ROW_LENGTH];
    
     int chars_written = sprintf(msg,"%d,%d,%d,%d,",courts[court_number].court_number,courts[court_number].game_start_time,courts[court_number].endtime,numplayers);
@@ -302,10 +302,6 @@ int main() {
 
     }
     // sem_init(&search,0,1);
-
-    FILE* output = fopen("output.csv", "w+");
-    fprintf(output, "Game-start-time,Game-end-time,Court-Number,List-of-player-ids\n");
-    fclose(output);
 
     printf("%s\n","Server running...waiting for connections.");
     #pragma omp parallel
