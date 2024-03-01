@@ -103,6 +103,8 @@ If the input csv file is `input.csv`
 ```
 ./client "input.csv"
 ```
+## NOTE
+The server doesn't handle the second priority of the clients. This is because we are interested into providing the player with their first preferences. So if there is player with a preference `b` will be waiting for a `b` or `S` preference player. Since the server doesn't know before hand if there will be a coming request that will allow the `b` player to play with a doubles group. Catering to the first preferences unfortunately causes us to not be able to cater to secon preferences.  
 
 # Assignment 3
 For this assignemnt I used MPI to covert the forked process into processes that can communicate in a world. Once the clietns are finished playing, the loosers congratulate the winners to which the winners will respond with a "Thank you" to the loosers.  
@@ -135,3 +137,5 @@ If the input csv file is `input.csv` and it has `x` rows --> `x` player request.
 ```
 mpirun -np x+1 ./mc "input.csv"
 ```
+## NOTE
+The server doesn't handle the second priority of the clients. This is because we are interested into providing the player with their first preferences. So if there is player with a preference `b` will be waiting for a `b` or `S` preference player. Since the server doesn't know before hand if there will be a coming request that will allow the `b` player to play with a doubles group. Catering to the first preferences unfortunately causes us to not be able to cater to secon preferences.   
