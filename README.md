@@ -65,15 +65,17 @@ The Scheduler is multi-threaded.
                   |----thread to schedule double's games---->|  
 ```
 # Assignment 2  
-For assignment 2, the required source files are `client.c`, `server_schedule.c` and `server_play.c`.  
+For assignment 2, the required source files are `client.c`, `server_schedule.c`.  
 I have tried to mimic the actual world scenario in the sports complex through these programs for scheduling tennis games. Additinally, I have tried to decouple the working of the servers and the clients as much as I can.  
 ## Features
 ### Client
 1) The `client.c` loops through the rows of the input csv, and makes connection with the scheduling server (mimics attendant sitting in issuing complex) when the arrival time in the row is equal to the global time.  
 2) After this the client non-blockingly waits for a recieve from the server for 30s (one second is one minute) with respect to the global time. After which it times out.
-3) If the client gets a shcedule (i.e. the set of players it will play with, start time, end time etc..) it (each client) will initiate a connection (after global time equals the start time recieved) with the playing server (mimics actually entering into the court and playing).
-4) After playing, every client prints out when it game was supposed to end and what the global time is at the time of printing. Some synchronisation issues between server_play and client show up here.
-5) The chidren are forked, and the game schedule contains a lot of information, more than what is required for this assignment. This is to facilitate the building process for the upcoming assignment.
+3) If the client gets a shcedule (i.e. the set of players it will play with, start time, end time etc...) it (each client) will go to play the game by actually sleeping for the suration of the game (mimics actually entering into the court and playing).
+4) After playing, every client prints out when it game was supposed to end and what the global time is at the time of printing.
+5) The chidren are forked, and the game schedule contains a lot of information (court number, start time, end time, number of players, player ids), more than what is required for this assignment. This is to facilitate the building process for the upcoming assignment.
+6) If a client is timed out, the the client independently opts to close it's connection without letting the server know explicitly. The server will check if a client is active before scheduling a game. I found this solution better than letting the server keep track of time.
+7) Each client prints out useful information at each stage of the process.  
 
 ### Sceduling Server
 1) This server uses OpenMP directives for multi-threading.
@@ -81,6 +83,55 @@ I have tried to mimic the actual world scenario in the sports complex through th
 3) An extra function, `isClientAlive` is added to allow the server to check if a client has timed out or not before incuding this client in a schedule. This is important as the server doesn't maintain any notion of time.
 4) This server succesfully mimics an attendant in the sport's complex issue centre, where one asks if one can play tennis (if raquets are available and courts are free).
 
-### Playing Server
-1) This server uses OpenMP directives for multi-threading.
-2) This server mimics an actual game being played. It recieve requests to play for let's say some `x` mins by the client and sleeps for roughly `x` seconds before replying back to the client. Since the playing server and clients aren't synchronised... the time the clients stopped playing, and the time the should have...don't match...but thisdoesn't cause in inconsitency in the execution.
+## Running
+### Serever
+Compile using:  
+```
+gcc server_schedule.c -fopenmp -o ss
+```  
+Run using:  
+```
+./ss
+```
+### Client
+Compile using:  
+```
+gcc client.c -o client
+```
+Run using:  
+If the input csv file is `input.csv`  
+```
+./client "input.csv"
+```
+
+# Assignment 3
+For this assignemnt I used MPI to covert the forked process into processes that can communicate in a world. Once the clietns are finished playing, the loosers congratulate the winners to which the winners will respond with a "Thank you" to the loosers.  
+
+## Features
+### Client
+1) Let's first understand how the ranks are assigned and what do they do. The rank 0 process is responisble for keeping track of global time. It also sends the message that a particular other rank must send to the server when the global time is the arrival time of a row in the input.csv file provided. The other processes act as clients. They behave similar to the clients described in assignment 2.
+2) Other than this, the clients now greet each other in the following format `src-rank src-player_id to dest-rank dest-player_id: msg`.
+
+### Server
+The server remains the same as before.  
+
+## Running
+### Serever
+Compile using:  
+```
+gcc server_schedule.c -fopenmp -o ss
+```  
+Run using:  
+```
+./ss
+```
+### Client
+Compile using:  
+```
+mpicc MPIClient.c -o mc
+```
+Run using:  
+If the input csv file is `input.csv` and it has `x` rows --> `x` player request.  
+```
+mpirun -np x+1 ./mc "input.csv"
+```
