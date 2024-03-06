@@ -58,7 +58,6 @@ int main(int argc, char **argv) {
     singles_queue.count = 0;
     doubles_queue.front = doubles_queue.rear = NULL;
     doubles_queue.count = 0;
-    strcpy(outputf,argv[2]);
 
     for (int i = 0; i < MAX_COURTS; i++) {
         courts[i].court_number = i + 1;
